@@ -1,10 +1,13 @@
 from io import BytesIO
+import json
+import os
 
 import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
-from google.cloud import storage
 from google.cloud import bigquery
+from google.cloud import storage
+from google.oauth2 import service_account
 
 
 CLIENTES_PILOTOS_TABLE = "acpe-dev-uc-sandbox-aa.dev.clientes_pilotos"
@@ -57,6 +60,9 @@ TICKET_COL_CANDIDATES = (
     "avg_ticket",
 )
 
+_STORAGE_CLIENT = None
+_BQ_CLIENT = None
+
 
 def _coerce_float_cols(df_in, cols):
     df = df_in.copy()
@@ -71,8 +77,62 @@ def _bq_read_table(client, table_fqn):
     return client.query(query).to_dataframe(create_bqstorage_client=False)
 
 
+def _get_gcp_credentials_and_project():
+    project = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT")
+    creds = None
+
+    # 1) Credenciales JSON completas en env var.
+    raw_json = os.getenv("GCP_SERVICE_ACCOUNT_JSON")
+    if raw_json:
+        info = json.loads(raw_json)
+        creds = service_account.Credentials.from_service_account_info(info)
+        project = project or info.get("project_id")
+        return creds, project
+
+    # 2) Credenciales desde Streamlit secrets.
+    try:
+        import streamlit as st  # import local para no forzar dependencia fuera de Streamlit
+
+        if "gcp_service_account" in st.secrets:
+            info = dict(st.secrets["gcp_service_account"])
+            creds = service_account.Credentials.from_service_account_info(info)
+            project = project or info.get("project_id")
+            return creds, project
+    except Exception:
+        pass
+
+    # 3) Fallback a Application Default Credentials.
+    return None, project
+
+
+def _get_storage_client():
+    global _STORAGE_CLIENT
+    if _STORAGE_CLIENT is not None:
+        return _STORAGE_CLIENT
+
+    creds, project = _get_gcp_credentials_and_project()
+    if creds is not None:
+        _STORAGE_CLIENT = storage.Client(project=project, credentials=creds)
+    else:
+        _STORAGE_CLIENT = storage.Client(project=project)
+    return _STORAGE_CLIENT
+
+
+def _get_bigquery_client():
+    global _BQ_CLIENT
+    if _BQ_CLIENT is not None:
+        return _BQ_CLIENT
+
+    creds, project = _get_gcp_credentials_and_project()
+    if creds is not None:
+        _BQ_CLIENT = bigquery.Client(project=project, credentials=creds)
+    else:
+        _BQ_CLIENT = bigquery.Client(project=project)
+    return _BQ_CLIENT
+
+
 def _read_parquet_from_gcs(bucket_name, blob_name):
-    storage_client = storage.Client()
+    storage_client = _get_storage_client()
     bucket = storage_client.bucket(bucket_name)
     blob = bucket.blob(blob_name)
     content = blob.download_as_bytes()
@@ -80,7 +140,7 @@ def _read_parquet_from_gcs(bucket_name, blob_name):
 
 
 def _read_csv_from_gcs(bucket_name, blob_name):
-    storage_client = storage.Client()
+    storage_client = _get_storage_client()
     bucket = storage_client.bucket(bucket_name)
     blob = bucket.blob(blob_name)
     content = blob.download_as_bytes()
@@ -103,7 +163,7 @@ def _read_parquet_filtered_in_batches(
     columns=None,
     batch_size=200_000,
 ):
-    storage_client = storage.Client()
+    storage_client = _get_storage_client()
     bucket = storage_client.bucket(bucket_name)
     blob = bucket.blob(blob_name)
 
@@ -212,7 +272,7 @@ def _resolve_ticket_blob(boca_salida):
 def load_filter_options_from_storage(boca_salida, flg_potential=None):
     base_blob = _resolve_base_blob(boca_salida, flg_potential)
     cols = list(dict.fromkeys([*COMMON_FILTER_COLS, *EXCLUSION_FILTER_COLS]))
-    storage_client = storage.Client()
+    storage_client = _get_storage_client()
     bucket = storage_client.bucket(BOCA_SALIDA_BUCKET)
     blob = bucket.blob(base_blob)
 
@@ -330,7 +390,7 @@ def _build_ticket_region(ticket_df_in):
 def load_inputs(inputs_dir="inputs", include_filters=None, exclusion_filters=None, return_debug=False):
     _ = inputs_dir  # compatibilidad con firma previa
 
-    client = bigquery.Client()
+    client = _get_bigquery_client()
 
     include_filters = include_filters or {}
     exclusion_filters = exclusion_filters or {}
