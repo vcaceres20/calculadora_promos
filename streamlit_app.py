@@ -66,7 +66,6 @@ st.markdown(
 )
 
 
-@st.cache_data(show_spinner=False)
 def load_data(include_filters_key, exclusion_filters_key):
     include_filters = {k: list(v) for k, v in include_filters_key}
     exclusion_filters = {k: list(v) for k, v in exclusion_filters_key}
@@ -80,7 +79,6 @@ def load_data(include_filters_key, exclusion_filters_key):
     return base, ticket_pedido, ticket_region, debug_data
 
 
-@st.cache_data(show_spinner=False)
 def load_options(boca_salida, flg_potential):
     return load_filter_options_from_storage(boca_salida, flg_potential)
 
@@ -136,6 +134,19 @@ def _build_targets_for_months(meses_n):
         extra_rows.append({"mes": str(p), "objetivo_mensual": last_obj})
 
     return pd.concat([base, pd.DataFrame(extra_rows)], ignore_index=True).tail(meses_n).reset_index(drop=True)
+
+
+def _style_numbers(df):
+    if df.empty:
+        return df
+    fmt = {}
+    for col in df.columns:
+        col_l = col.lower()
+        if "%_" in col_l or col_l.startswith("pct_") or col_l.endswith("_pct"):
+            fmt[col] = "{:.2%}"
+        elif pd.api.types.is_numeric_dtype(df[col]):
+            fmt[col] = "{:,.2f}"
+    return df.style.format(fmt)
 
 
 st.title("Calculadora Promos")
@@ -265,37 +276,6 @@ if run:
             col_ticket="ticket_pedido",
             targets=targets_for_plan,
         )
-    debug_data["by_cli_head"] = by_cli.head(5).copy()
-    debug_data["sel_head"] = sel.head(5).copy()
-    debug_data["resumen_head"] = resumen.head(5).copy()
-    debug_data["plan_head"] = plan.head(5).copy()
-    st.session_state["base"] = base
-    st.session_state["ticket_region"] = ticket_region
-    st.session_state["plan"] = plan
-    st.session_state["sel"] = sel
-    st.session_state["resumen"] = resumen
-    st.session_state["debug_data"] = debug_data
-
-if "plan" in st.session_state and "base" in st.session_state and "ticket_region" in st.session_state:
-    base = st.session_state["base"]
-    ticket_region = st.session_state["ticket_region"]
-    plan = st.session_state["plan"]
-    sel = st.session_state["sel"]
-    resumen = st.session_state["resumen"]
-
-    def _style_numbers(df):
-        if df.empty:
-            return df
-        fmt = {}
-        for col in df.columns:
-            col_l = col.lower()
-            if "%_" in col_l or col_l.startswith("pct_") or col_l.endswith("_pct"):
-                fmt[col] = "{:.2%}"
-            elif pd.api.types.is_numeric_dtype(df[col]):
-                fmt[col] = "{:,.2f}"
-        return df.style.format(fmt)
-
-    debug_data = st.session_state.get("debug_data", {})
     clientes_filtrados = int(debug_data.get("df_filtered_clientes", 0))
     clientes_total = int(debug_data.get("df_post_pilotos_clientes", 0))
     clientes_excluidos = max(clientes_filtrados - clientes_total, 0)

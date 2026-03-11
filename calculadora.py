@@ -10,7 +10,7 @@ from google.cloud import storage
 from google.oauth2 import service_account
 
 
-CLIENTES_PILOTOS_TABLE = "acpe-dev-uc-sandbox-aa.dev.clientes_pilotos"
+CLIENTES_PILOTOS_TABLE = "acpe-dev-uc-ml.dev.clientes_pilotos"
 BOCA_SALIDA_BUCKET = "acpe-dev-uc-ml-promociones"
 BO_SP_BLOB = "tmp/bo_sp.parquet"
 BO_CP_BLOB = "tmp/bo_cp.parquet"
